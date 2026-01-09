@@ -54,7 +54,8 @@
                             iterative_bte, scattering, selecqread, epmatkqread,        &
                             ncarrier, carrier, scattering_serta, restart, restart_step,&
                             scattering_0rta, longrange_only, shortrange, scatread,     &
-                            restart_filq, prtgkk, nel, meff, epsiheg, lphase, use_ws,  &
+                            restart_filq, prtgkk, write_elph_fine, write_elph_coarse, &
+                            nel, meff, epsiheg, lphase, use_ws,  &
                             omegamin, omegamax, omegastep, lindabs, mob_maxiter,       &
                             auto_projections, scdm_proj, scdm_entanglement, scdm_mu,   &
                             scdm_sigma, assume_metal, wannier_plot, wannier_plot_list, &
@@ -181,6 +182,7 @@
        delta_approx, scattering, int_mob, scissor, ncarrier, carrier,          &
        iterative_bte, scattering_serta, scattering_0rta, longrange_only,       &
        scatread, restart, restart_step, restart_filq, prtgkk, nel, meff,       &
+       write_elph_fine, write_elph_coarse,                                      &
        epsiheg, lphase, omegamin, omegamax, omegastep, lindabs, sigma_ref,     &
        mob_maxiter, auto_projections, scdm_proj, scdm_entanglement, scdm_mu,   &
        scdm_sigma, assume_metal, wannier_plot, wannier_plot_list, reduce_unk,  &
@@ -680,6 +682,8 @@
   longrange_only         = .FALSE.
   shortrange             = .FALSE.
   prtgkk                 = .FALSE.
+  write_elph_fine        = .FALSE.
+  write_elph_coarse      = .FALSE.
   nel                    = 0.0d0
   meff                   = 1.d0
   epsiheg                = 1.d0

@@ -31,6 +31,7 @@
                                nstemp, int_mob, scissor, carrier, iterative_bte,   &
                                longrange_only, scatread, nqf1, nqf2, nqf3,         &
                                mp_mesh_k, restart, plselfen, prtgkk, specfun_pl,   &
+                               write_elph_fine, write_elph_coarse,                  &
                                lindabs, fermi_plot, epmatkqread, restart_step,     &
                                nsmear, ii_partion, nqc1, nqc2, nqc3, assume_metal, &
                                eliashberg, meshnum, time_rev_U_plrn, lwfpt, ii_g,  &
@@ -109,6 +110,7 @@
   USE supercond_vertex, ONLY : prepare_a2f
 #if defined(__HDF5)
   USE expolaron,        ONLY : run_explrn
+  USE printing,         ONLY : write_elph_fine_hdf5
 #endif   
 #if defined(__MPI)
   USE parallel_include, ONLY : MPI_MODE_RDONLY, MPI_INFO_NULL, MPI_OFFSET_KIND,    &
@@ -1312,6 +1314,9 @@
           !
           IF (plrn      ) CALL plrn_save_g_to_file(iq, epf17, wf)
           IF (prtgkk    ) CALL print_gkk(iq)
+#if defined(__HDF5)
+          IF (write_elph_fine) CALL write_elph_fine_hdf5(iq, nqtotf)
+#endif
           IF (phonselfen) CALL selfen_phon_q(iqq, iq, totq)
           IF (elecselfen .OR. specfun_el) CALL selfen_elec_q(iqq, iq, totq, first_cycle)
           IF (plselfen .AND. vme == 'dipole') CALL selfen_pl_q(iqq, iq, totq, first_cycle)

@@ -291,6 +291,370 @@
     END SUBROUTINE print_gkk
     !-----------------------------------------------------------------------
     !
+#if defined(__HDF5)
+    !-----------------------------------------------------------------------
+    SUBROUTINE write_elph_fine_hdf5(iq, nqtotf_in)
+    !-----------------------------------------------------------------------
+    !!
+    !! Write the electron-phonon matrix elements on fine grid to HDF5 files.
+    !! Each pool writes its own file: <prefix>.elph_fine<pool_id>.h5
+    !! Dataset: /elph_fine (nqtotf, nkf, nmodes, nbndfst, nbndfst, 2)
+    !! The factor of 2 is for real and imaginary parts.
+    !!
+    !! On first q-point (iq=1): create file and dataset
+    !! On each q-point: write the slice for that q
+    !! On last q-point: close file
+    !!
+    !-----------------------------------------------------------------------
+    USE kinds,         ONLY : DP
+    USE io_global,     ONLY : stdout
+    USE io_files,      ONLY : prefix, tmp_dir
+    USE modes,         ONLY : nmodes
+    USE global_var,    ONLY : nbndfst, nkf, epf17
+    USE mp_global,     ONLY : my_pool_id, npool
+    USE low_lvl,       ONLY : set_ndnmbr
+    USE hdf5
+    !
+    IMPLICIT NONE
+    !
+    INTEGER, INTENT(in) :: iq
+    !! Current q-point index
+    INTEGER, INTENT(in) :: nqtotf_in
+    !! Total number of q-points
+    !
+    ! Local variables
+    CHARACTER(LEN=256) :: filename
+    !! HDF5 file name
+    CHARACTER(LEN=4) :: filelab
+    !! Pool label for file name
+    INTEGER :: ik, ibnd, jbnd, nu
+    !! Loop indices
+    INTEGER :: error
+    !! HDF5 error status
+    INTEGER(HID_T), SAVE :: file_id
+    !! HDF5 file identifier (saved across calls)
+    INTEGER(HID_T), SAVE :: dset_id
+    !! HDF5 dataset identifier (saved across calls)
+    INTEGER(HID_T) :: filespace
+    !! HDF5 file dataspace
+    INTEGER(HID_T) :: memspace
+    !! HDF5 memory dataspace
+    INTEGER(HSIZE_T) :: dims(6)
+    !! Dataset dimensions: (2, nbndfst, nbndfst, nmodes, nkf, nqtotf)
+    INTEGER(HSIZE_T) :: count(6)
+    !! Hyperslab count
+    INTEGER(HSIZE_T) :: offset(6)
+    !! Hyperslab offset
+    INTEGER(HSIZE_T) :: mem_dims(5)
+    !! Memory dimensions for one q-point slice: (2, nbndfst, nbndfst, nmodes, nkf)
+    INTEGER(HSIZE_T) :: dims1(1)
+    !! Dimension for scalar datasets
+    INTEGER(HID_T) :: dspace_scalar
+    !! Dataspace for scalars
+    INTEGER(HID_T) :: dset_scalar
+    !! Dataset for scalars
+    REAL(KIND = DP), ALLOCATABLE :: elph_slice(:,:,:,:,:)
+    !! Data for one q-point: (2, nbndfst, nbndfst, nmodes, nkf)
+    INTEGER :: pool_id_arr(1), npool_arr(1)
+    !! Arrays for scalar integer writes
+    !
+    ! Generate filename with pool ID
+    CALL set_ndnmbr(0, my_pool_id + 1, 1, npool, filelab)
+    filename = TRIM(tmp_dir) // TRIM(prefix) // '.elph_fine' // TRIM(filelab) // '.h5'
+    !
+    ! === First q-point: Create file and dataset ===
+    IF (iq == 1) THEN
+      !
+      WRITE(stdout, '(/5x, "Creating elph_fine HDF5 file: ", A)') TRIM(filename)
+      WRITE(stdout, '(5x, "  nqtotf=", I6, " nkf=", I6, " nmodes=", I3, " nbndfst=", I3)') &
+            nqtotf_in, nkf, nmodes, nbndfst
+      !
+      ! Initialize HDF5
+      CALL h5open_f(error)
+      IF (error /= 0) CALL errore('write_elph_fine_hdf5', 'Error initializing HDF5', 1)
+      !
+      ! Create file
+      CALL h5fcreate_f(TRIM(filename), H5F_ACC_TRUNC_F, file_id, error)
+      IF (error /= 0) CALL errore('write_elph_fine_hdf5', 'Error creating HDF5 file', 1)
+      !
+      ! Create dataspace with full dimensions: (2, i, j, nu, k, q)
+      dims(1) = 2  ! real, imag
+      dims(2) = nbndfst
+      dims(3) = nbndfst
+      dims(4) = nmodes
+      dims(5) = nkf
+      dims(6) = nqtotf_in
+      CALL h5screate_simple_f(6, dims, filespace, error)
+      IF (error /= 0) CALL errore('write_elph_fine_hdf5', 'Error creating dataspace', 1)
+      !
+      ! Create dataset
+      CALL h5dcreate_f(file_id, 'elph_fine', H5T_NATIVE_DOUBLE, filespace, dset_id, error)
+      IF (error /= 0) CALL errore('write_elph_fine_hdf5', 'Error creating dataset', 1)
+      !
+      CALL h5sclose_f(filespace, error)
+      !
+      ! --- Write pool_id dataset ---
+      pool_id_arr(1) = my_pool_id
+      dims1(1) = 1
+      CALL h5screate_simple_f(1, dims1, dspace_scalar, error)
+      CALL h5dcreate_f(file_id, 'pool_id', H5T_NATIVE_INTEGER, dspace_scalar, dset_scalar, error)
+      CALL h5dwrite_f(dset_scalar, H5T_NATIVE_INTEGER, pool_id_arr, dims1, error)
+      CALL h5dclose_f(dset_scalar, error)
+      CALL h5sclose_f(dspace_scalar, error)
+      !
+      ! --- Write npool dataset ---
+      npool_arr(1) = npool
+      dims1(1) = 1
+      CALL h5screate_simple_f(1, dims1, dspace_scalar, error)
+      CALL h5dcreate_f(file_id, 'npool', H5T_NATIVE_INTEGER, dspace_scalar, dset_scalar, error)
+      CALL h5dwrite_f(dset_scalar, H5T_NATIVE_INTEGER, npool_arr, dims1, error)
+      CALL h5dclose_f(dset_scalar, error)
+      CALL h5sclose_f(dspace_scalar, error)
+      !
+    ENDIF
+    !
+    ! === Write data for this q-point ===
+    !
+    ! Allocate and fill slice array: (2, i, j, nu, k)
+    ALLOCATE(elph_slice(2, nbndfst, nbndfst, nmodes, nkf))
+    !
+    DO ik = 1, nkf
+      DO nu = 1, nmodes
+        DO jbnd = 1, nbndfst
+          DO ibnd = 1, nbndfst
+            elph_slice(1, ibnd, jbnd, nu, ik) = REAL(epf17(ibnd, jbnd, nu, ik))
+            elph_slice(2, ibnd, jbnd, nu, ik) = AIMAG(epf17(ibnd, jbnd, nu, ik))
+          ENDDO
+        ENDDO
+      ENDDO
+    ENDDO
+    !
+    ! Define hyperslab in file: (2, i, j, nu, k, q)
+    offset(1) = 0
+    offset(2) = 0
+    offset(3) = 0
+    offset(4) = 0
+    offset(5) = 0
+    offset(6) = iq - 1  ! q-point index (0-based)
+    count(1) = 2
+    count(2) = nbndfst
+    count(3) = nbndfst
+    count(4) = nmodes
+    count(5) = nkf
+    count(6) = 1
+    !
+    CALL h5dget_space_f(dset_id, filespace, error)
+    CALL h5sselect_hyperslab_f(filespace, H5S_SELECT_SET_F, offset, count, error)
+    IF (error /= 0) CALL errore('write_elph_fine_hdf5', 'Error selecting hyperslab', 1)
+    !
+    ! Define memory dataspace: (2, i, j, nu, k)
+    mem_dims(1) = 2
+    mem_dims(2) = nbndfst
+    mem_dims(3) = nbndfst
+    mem_dims(4) = nmodes
+    mem_dims(5) = nkf
+    CALL h5screate_simple_f(5, mem_dims, memspace, error)
+    IF (error /= 0) CALL errore('write_elph_fine_hdf5', 'Error creating memspace', 1)
+    !
+    ! Write data
+    CALL h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, elph_slice, mem_dims, error, &
+                    mem_space_id=memspace, file_space_id=filespace)
+    IF (error /= 0) CALL errore('write_elph_fine_hdf5', 'Error writing data', 1)
+    !
+    CALL h5sclose_f(memspace, error)
+    CALL h5sclose_f(filespace, error)
+    DEALLOCATE(elph_slice)
+    !
+    ! === Last q-point: Close file ===
+    IF (iq == nqtotf_in) THEN
+      CALL h5dclose_f(dset_id, error)
+      CALL h5fclose_f(file_id, error)
+      CALL h5close_f(error)
+      WRITE(stdout, '(5x, "Finished writing elph_fine HDF5 file")')
+    ENDIF
+    !
+    RETURN
+    !
+    !-----------------------------------------------------------------------
+    END SUBROUTINE write_elph_fine_hdf5
+    !-----------------------------------------------------------------------
+    !
+    !-----------------------------------------------------------------------
+    SUBROUTINE write_elph_coarse_hdf5(nqc, xqc, et_loc, dynq, epmatq, zstar, epsi, &
+                                       nbndsub, nks, nmodes_in, nat, my_pool_id, npool, &
+                                       tmp_dir, prefix)
+    !-----------------------------------------------------------------------
+    !!
+    !! Write the electron-phonon matrix elements on coarse grid to HDF5 files.
+    !! Each pool writes its own file: <prefix>.elph_coarse<pool_id>.h5
+    !! Datasets:
+    !!   /elph_coarse - epmatq (real,imag interleaved)
+    !!   /zstar - Born effective charges
+    !!   /epsi - Dielectric tensor
+    !!   /pool_id - Pool ID
+    !!   /npool - Number of pools
+    !!
+    !-----------------------------------------------------------------------
+    USE kinds,         ONLY : DP
+    USE io_global,     ONLY : stdout
+    USE low_lvl,       ONLY : set_ndnmbr
+    USE hdf5
+    !
+    IMPLICIT NONE
+    !
+    INTEGER, INTENT(in) :: nqc
+    !! Number of q-points on coarse grid
+    REAL(KIND = DP), INTENT(in) :: xqc(3, nqc)
+    !! q-point coordinates
+    REAL(KIND = DP), INTENT(in) :: et_loc(nbndsub, nks)
+    !! Eigenvalues
+    INTEGER, INTENT(in) :: nbndsub
+    !! Number of bands in subspace
+    INTEGER, INTENT(in) :: nks
+    !! Number of k-points in this pool
+    INTEGER, INTENT(in) :: nmodes_in
+    !! Number of phonon modes
+    INTEGER, INTENT(in) :: nat
+    !! Number of atoms (for zstar dimension)
+    INTEGER, INTENT(in) :: my_pool_id
+    !! Pool ID
+    INTEGER, INTENT(in) :: npool
+    !! Total number of pools
+    CHARACTER(LEN=*), INTENT(in) :: tmp_dir
+    !! Temporary directory
+    CHARACTER(LEN=*), INTENT(in) :: prefix
+    !! Job prefix
+    COMPLEX(KIND = DP), INTENT(in) :: dynq(nmodes_in, nmodes_in, nqc)
+    !! Dynamical matrix
+    COMPLEX(KIND = DP), INTENT(in) :: epmatq(nbndsub, nbndsub, nks, nmodes_in, nqc)
+    !! Electron-phonon matrix on coarse grid
+    REAL(KIND = DP), INTENT(in) :: zstar(3, 3, nat)
+    !! Born effective charges
+    REAL(KIND = DP), INTENT(in) :: epsi(3, 3)
+    !! Dielectric tensor
+    !
+    ! Local variables
+    CHARACTER(LEN=256) :: filename
+    !! HDF5 file name
+    CHARACTER(LEN=4) :: filelab
+    !! Pool label for file name
+    INTEGER :: iq, ik, ibnd, jbnd, nu
+    !! Loop indices
+    INTEGER :: error
+    !! HDF5 error status
+    INTEGER(HID_T) :: file_id
+    !! HDF5 file identifier
+    INTEGER(HID_T) :: dspace_id
+    !! HDF5 dataspace identifier
+    INTEGER(HID_T) :: dset_id
+    !! HDF5 dataset identifier
+    INTEGER(HSIZE_T) :: dims1(1), dims2(2), dims3(3), dims6(6)
+    !! Dataset dimensions
+    REAL(KIND = DP), ALLOCATABLE :: elph_data(:,:,:,:,:,:)
+    !! 6D elph data (2, nbndsub, nbndsub, nks, nmodes, nqc)
+    INTEGER :: pool_id_arr(1), npool_arr(1)
+    !! Arrays for scalar integer writes
+    !
+    ! Generate filename with pool ID
+    CALL set_ndnmbr(0, my_pool_id + 1, 1, npool, filelab)
+    filename = TRIM(tmp_dir) // TRIM(prefix) // '.elph_coarse' // TRIM(filelab) // '.h5'
+    !
+    WRITE(stdout, '(/5x, "Writing elph_coarse to HDF5: ", A)') TRIM(filename)
+    WRITE(stdout, '(5x, "  nqc=", I6, " nks=", I6, " nmodes=", I3, " nbndsub=", I3)') &
+          nqc, nks, nmodes_in, nbndsub
+    !
+    ! Data layout: (2, i, j, nu, k, q) = (2, nbndsub, nbndsub, nmodes, nks, nqc)
+    ! First dimension: 1=real, 2=imaginary parts
+    !
+    ALLOCATE(elph_data(2, nbndsub, nbndsub, nmodes_in, nks, nqc))
+    !
+    ! Fill data array with epmatq values
+    DO iq = 1, nqc
+      DO ik = 1, nks
+        DO nu = 1, nmodes_in
+          DO jbnd = 1, nbndsub
+            DO ibnd = 1, nbndsub
+              elph_data(1, ibnd, jbnd, nu, ik, iq) = REAL(epmatq(ibnd, jbnd, ik, nu, iq))
+              elph_data(2, ibnd, jbnd, nu, ik, iq) = AIMAG(epmatq(ibnd, jbnd, ik, nu, iq))
+            ENDDO
+          ENDDO
+        ENDDO
+      ENDDO
+    ENDDO
+    !
+    ! Initialize HDF5
+    CALL h5open_f(error)
+    IF (error /= 0) CALL errore('write_elph_coarse_hdf5', 'Error initializing HDF5', 1)
+    !
+    ! Create file
+    CALL h5fcreate_f(TRIM(filename), H5F_ACC_TRUNC_F, file_id, error)
+    IF (error /= 0) CALL errore('write_elph_coarse_hdf5', 'Error creating HDF5 file', 1)
+    !
+    ! --- Write elph_coarse dataset (6D: 2 x i x j x nu x k x q) ---
+    dims6(1) = 2
+    dims6(2) = nbndsub
+    dims6(3) = nbndsub
+    dims6(4) = nmodes_in
+    dims6(5) = nks
+    dims6(6) = nqc
+    CALL h5screate_simple_f(6, dims6, dspace_id, error)
+    CALL h5dcreate_f(file_id, 'elph_coarse', H5T_NATIVE_DOUBLE, dspace_id, dset_id, error)
+    CALL h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, elph_data, dims6, error)
+    CALL h5dclose_f(dset_id, error)
+    CALL h5sclose_f(dspace_id, error)
+    !
+    ! --- Write zstar dataset (3, 3, nat) ---
+    dims3(1) = 3
+    dims3(2) = 3
+    dims3(3) = nat
+    CALL h5screate_simple_f(3, dims3, dspace_id, error)
+    CALL h5dcreate_f(file_id, 'zstar', H5T_NATIVE_DOUBLE, dspace_id, dset_id, error)
+    CALL h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, zstar, dims3, error)
+    CALL h5dclose_f(dset_id, error)
+    CALL h5sclose_f(dspace_id, error)
+    !
+    ! --- Write epsi dataset (3, 3) ---
+    dims2(1) = 3
+    dims2(2) = 3
+    CALL h5screate_simple_f(2, dims2, dspace_id, error)
+    CALL h5dcreate_f(file_id, 'epsi', H5T_NATIVE_DOUBLE, dspace_id, dset_id, error)
+    CALL h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, epsi, dims2, error)
+    CALL h5dclose_f(dset_id, error)
+    CALL h5sclose_f(dspace_id, error)
+    !
+    ! --- Write pool_id dataset ---
+    pool_id_arr(1) = my_pool_id
+    dims1(1) = 1
+    CALL h5screate_simple_f(1, dims1, dspace_id, error)
+    CALL h5dcreate_f(file_id, 'pool_id', H5T_NATIVE_INTEGER, dspace_id, dset_id, error)
+    CALL h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, pool_id_arr, dims1, error)
+    CALL h5dclose_f(dset_id, error)
+    CALL h5sclose_f(dspace_id, error)
+    !
+    ! --- Write npool dataset ---
+    npool_arr(1) = npool
+    dims1(1) = 1
+    CALL h5screate_simple_f(1, dims1, dspace_id, error)
+    CALL h5dcreate_f(file_id, 'npool', H5T_NATIVE_INTEGER, dspace_id, dset_id, error)
+    CALL h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, npool_arr, dims1, error)
+    CALL h5dclose_f(dset_id, error)
+    CALL h5sclose_f(dspace_id, error)
+    !
+    ! Close file
+    CALL h5fclose_f(file_id, error)
+    CALL h5close_f(error)
+    !
+    DEALLOCATE(elph_data)
+    !
+    WRITE(stdout, '(5x, "elph_coarse HDF5 write complete")')
+    !
+    RETURN
+    !
+    !-----------------------------------------------------------------------
+    END SUBROUTINE write_elph_coarse_hdf5
+    !-----------------------------------------------------------------------
+#endif
+    !
     !-----------------------------------------------------------------------
     SUBROUTINE print_meff_sym(f_out, bztoibz_mat, vkk_all, etf_all, wkf_all, &
                              ef0, sigma, max_mob, xkf_all)

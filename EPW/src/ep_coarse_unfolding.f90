@@ -54,7 +54,7 @@
                             nbndsub, iswitch, kmaps, eig_read, dvscf_dir,       &
                             nkc1, nkc2, nkc3, nqc1, nqc2, nqc3,                 &
                             fixsym, epw_noinv, system_2d, compute_dmat, lwfpt,  &
-                            exciton             
+                            exciton, write_elph_coarse             
                             ! ZD: last line for ex-plrn
   USE global_var,    ONLY : epmatq, dynq, et_ks, xkq, ifc, veff,&
                             zstar, epsi, cu, cuq, lwin, lwinq, nbndep, ibndkept,&
@@ -89,6 +89,9 @@
 
 #if defined(__NAG)
   USE f90_unix_io,   ONLY : flush
+#endif
+#if defined(__HDF5)
+  USE printing,      ONLY : write_elph_coarse_hdf5
 #endif
   !
   ! --------------------------------------------------------------
@@ -1099,6 +1102,14 @@
         CLOSE(iuepb)
         WRITE(stdout, '(/5x, "The .epb files have been correctly written"/)')
       ENDIF
+      !
+#if defined(__HDF5)
+      IF (write_elph_coarse) THEN
+        CALL write_elph_coarse_hdf5(nqc, xqc, et_loc, dynq, epmatq, zstar, epsi, &
+                                    nbndsub, nks, nmodes, nat, my_pool_id, npool, &
+                                    tmp_dir, prefix)
+      ENDIF
+#endif
     ENDIF
   ENDIF
   !

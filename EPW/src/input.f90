@@ -142,6 +142,10 @@
   !! if .TRUE. fermi energy is read from the input file
   LOGICAL :: prtgkk
   !! if .TRUE. print the |g| vertex in [meV].
+  LOGICAL :: write_elph_fine
+  !! if .TRUE. write fine grid elph to HDF5 files (one per pool)
+  LOGICAL :: write_elph_coarse
+  !! if .TRUE. write coarse grid elph to HDF5 files (one per pool)
   LOGICAL :: lphase
   !! if .TRUE. fix the gauge when diagonalizing the interpolated dynamical matrix and electronic Hamiltonian.
   LOGICAL :: lrot

@@ -310,7 +310,7 @@
     USE io_global,     ONLY : stdout
     USE io_files,      ONLY : prefix, tmp_dir
     USE modes,         ONLY : nmodes
-    USE global_var,    ONLY : nbndfst, nkf, epf17
+    USE global_var,    ONLY : nbndfst, nkf, epf17, xkf, xqf, nkqf
     USE mp_global,     ONLY : my_pool_id, npool
     USE low_lvl,       ONLY : set_ndnmbr
     USE hdf5
@@ -411,6 +411,36 @@
       CALL h5dclose_f(dset_scalar, error)
       CALL h5sclose_f(dspace_scalar, error)
       !
+      ! --- Write xkf dataset (3, nkf) - k-points in crystal coords ---
+      BLOCK
+        INTEGER(HSIZE_T) :: dims_kq(2)
+        INTEGER(HID_T) :: dspace_kq, dset_kq
+        REAL(KIND = DP), ALLOCATABLE :: xkf_only(:,:)
+        ALLOCATE(xkf_only(3, nkf))
+        xkf_only(:,:) = xkf(:, 1:nkqf:2)  ! Extract k-points (odd indices)
+        dims_kq(1) = 3
+        dims_kq(2) = nkf
+        CALL h5screate_simple_f(2, dims_kq, dspace_kq, error)
+        CALL h5dcreate_f(file_id, 'xkf', H5T_NATIVE_DOUBLE, dspace_kq, dset_kq, error)
+        CALL h5dwrite_f(dset_kq, H5T_NATIVE_DOUBLE, xkf_only, dims_kq, error)
+        CALL h5dclose_f(dset_kq, error)
+        CALL h5sclose_f(dspace_kq, error)
+        DEALLOCATE(xkf_only)
+      END BLOCK
+      !
+      ! --- Write xqf dataset (3, nqtotf) - q-points in crystal coords ---
+      BLOCK
+        INTEGER(HSIZE_T) :: dims_q(2)
+        INTEGER(HID_T) :: dspace_q, dset_q
+        dims_q(1) = 3
+        dims_q(2) = nqtotf_in
+        CALL h5screate_simple_f(2, dims_q, dspace_q, error)
+        CALL h5dcreate_f(file_id, 'xqf', H5T_NATIVE_DOUBLE, dspace_q, dset_q, error)
+        CALL h5dwrite_f(dset_q, H5T_NATIVE_DOUBLE, xqf, dims_q, error)
+        CALL h5dclose_f(dset_q, error)
+        CALL h5sclose_f(dspace_q, error)
+      END BLOCK
+      !
     ENDIF
     !
     ! === Write data for this q-point ===
@@ -480,7 +510,7 @@
     !-----------------------------------------------------------------------
     !
     !-----------------------------------------------------------------------
-    SUBROUTINE write_elph_coarse_hdf5(nqc, xqc, et_loc, dynq, epmatq, zstar, epsi, &
+    SUBROUTINE write_elph_coarse_hdf5(nqc, xqc, xkc, et_loc, dynq, epmatq, zstar, epsi, &
                                        nbndsub, nks, nmodes_in, nat, my_pool_id, npool, &
                                        tmp_dir, prefix)
     !-----------------------------------------------------------------------
@@ -489,6 +519,8 @@
     !! Each pool writes its own file: <prefix>.elph_coarse<pool_id>.h5
     !! Datasets:
     !!   /elph_coarse - epmatq (real,imag interleaved)
+    !!   /xqc - q-point coordinates (3, nqc)
+    !!   /xkc - k-point coordinates (3, nks)
     !!   /zstar - Born effective charges
     !!   /epsi - Dielectric tensor
     !!   /pool_id - Pool ID
@@ -506,6 +538,8 @@
     !! Number of q-points on coarse grid
     REAL(KIND = DP), INTENT(in) :: xqc(3, nqc)
     !! q-point coordinates
+    REAL(KIND = DP), INTENT(in) :: xkc(3, nks)
+    !! k-point coordinates
     REAL(KIND = DP), INTENT(in) :: et_loc(nbndsub, nks)
     !! Eigenvalues
     INTEGER, INTENT(in) :: nbndsub
@@ -619,6 +653,24 @@
     CALL h5screate_simple_f(2, dims2, dspace_id, error)
     CALL h5dcreate_f(file_id, 'epsi', H5T_NATIVE_DOUBLE, dspace_id, dset_id, error)
     CALL h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, epsi, dims2, error)
+    CALL h5dclose_f(dset_id, error)
+    CALL h5sclose_f(dspace_id, error)
+    !
+    ! --- Write xqc dataset (3, nqc) - q-points in crystal coords ---
+    dims2(1) = 3
+    dims2(2) = nqc
+    CALL h5screate_simple_f(2, dims2, dspace_id, error)
+    CALL h5dcreate_f(file_id, 'xqc', H5T_NATIVE_DOUBLE, dspace_id, dset_id, error)
+    CALL h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, xqc, dims2, error)
+    CALL h5dclose_f(dset_id, error)
+    CALL h5sclose_f(dspace_id, error)
+    !
+    ! --- Write xkc dataset (3, nks) - k-points in crystal coords ---
+    dims2(1) = 3
+    dims2(2) = nks
+    CALL h5screate_simple_f(2, dims2, dspace_id, error)
+    CALL h5dcreate_f(file_id, 'xkc', H5T_NATIVE_DOUBLE, dspace_id, dset_id, error)
+    CALL h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, xkc, dims2, error)
     CALL h5dclose_f(dset_id, error)
     CALL h5sclose_f(dspace_id, error)
     !

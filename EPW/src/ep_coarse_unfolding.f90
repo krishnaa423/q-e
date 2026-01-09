@@ -1105,7 +1105,7 @@
       !
 #if defined(__HDF5)
       IF (write_elph_coarse) THEN
-        CALL write_elph_coarse_hdf5(nqc, xqc, et_loc, dynq, epmatq, zstar, epsi, &
+        CALL write_elph_coarse_hdf5(nqc, xqc, xk_all(:, ik_start:ik_stop), et_loc, dynq, epmatq, zstar, epsi, &
                                     nbndsub, nks, nmodes, nat, my_pool_id, npool, &
                                     tmp_dir, prefix)
       ENDIF
